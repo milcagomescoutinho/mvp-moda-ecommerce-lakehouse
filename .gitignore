@@ -1,0 +1,19 @@
+# Dados: o enunciado dispensa a entrega e a licença do Olist (CC BY-NC-SA 4.0) pede cuidado com redistribuição
+*.csv
+*.zip
+raw_files/
+data/
+
+# Python / testes locais
+__pycache__/
+*.pyc
+.venv/
+venv/
+spark-warehouse/
+metastore_db/
+derby.log
+.ipynb_checkpoints/
+
+# Sistema
+.DS_Store
+Thumbs.db
