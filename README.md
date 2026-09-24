@@ -2,8 +2,8 @@
 
 MVP de Engenharia de Dados construído no **Databricks Free Edition** (Unity Catalog, Delta Lake, PySpark e SQL), com arquitetura **Medalhão** (Bronze → Silver → Gold) e modelagem em **Esquema Estrela**.
 
-* **Autora:** [seu nome completo]
-* **Disciplina / turma:** [nome da disciplina e turma]
+* **Autora:** [MILCA GOMES COUTINHO]
+* **Disciplina / turma:** [Engenharia de Dados (40530010057_20260_01)]
 * **Plataforma:** Databricks Free Edition (computação serverless)
 * **Dataset:** Brazilian E-Commerce Public Dataset by Olist (Kaggle)
 
