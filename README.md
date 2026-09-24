@@ -2,8 +2,8 @@
 
 MVP de Engenharia de Dados construído no **Databricks Free Edition** (Unity Catalog, Delta Lake, PySpark e SQL), com arquitetura **Medalhão** (Bronze → Silver → Gold) e modelagem em **Esquema Estrela**.
 
-* **Autora:** [MILCA GOMES COUTINHO]
-* **Disciplina / turma:** [Engenharia de Dados (40530010057_20260_01)]
+* **Autora:** MILCA GOMES COUTINHO
+* **Disciplina / turma:** Engenharia de Dados (40530010057_20260_01)
 * **Plataforma:** Databricks Free Edition (computação serverless)
 * **Dataset:** Brazilian E-Commerce Public Dataset by Olist (Kaggle)
 
@@ -16,7 +16,9 @@ MVP de Engenharia de Dados construído no **Databricks Free Edition** (Unity Cat
 5. [Qualidade de Dados (Etapa 4.5)](#qualidade-de-dados-etapa-45)
 6. [Análise de Dados (Etapa 4.5)](#análise-de-dados-etapa-45)
 7. [Autoavaliação](#autoavaliação)
-8. [Como reproduzir e estrutura do repositório](#como-reproduzir-e-estrutura-do-repositório)
+8. [Bônus: dashboard de mídia paga no Databricks](#bônus-dashboard-de-mídia-paga-no-databricks)
+9. [Como reproduzir e estrutura do repositório](#como-reproduzir-e-estrutura-do-repositório)
+10. [Referências](#referências)
 
 ```mermaid
 flowchart LR
@@ -888,10 +890,23 @@ Do lado técnico, o próprio Free Edition trouxe um ponto de atenção real: a c
 * Cruzar com **dados reais de campanha** (Meta Ads e Google Ads, via Reportei ou API) para medir CPA, ROAS e CTR por praça e por data comemorativa, o que responderia diretamente ao que aqui é proxy.
 * Incluir **margem e custo de frete reais** de uma marca de moda para transformar o teto de CPA em número de decisão.
 * Modelar **LTV e cohorts** de recompra e testar **elasticidade do frete** (frete grátis por faixa de valor).
-* Automatizar o pipeline com **Lakeflow Jobs** agendado e **expectativas de qualidade** declarativas, e publicar a Gold em um **dashboard** (Databricks AI/BI ou Power BI) nos mesmos moldes dos dashboards de performance que já mantenho para clientes.
+* Automatizar o pipeline com **Lakeflow Jobs** agendado e **expectativas de qualidade** declarativas. Um primeiro dashboard de mídia já existe (ver "Bônus" abaixo); falta automatizar a atualização dele junto com o pipeline, e replicá-lo no Power BI, que é a ferramenta que uso com os clientes.
 * Enriquecer com **clima e feriados regionais** para estudar sazonalidade por região, e com dados de **turismo** para aprofundar o recorte de moda de viagem.
 * Conectar a Gold a dados reais de campanha (Meta, Google, TikTok e Pinterest Ads, via Reportei ou API de cada plataforma) para substituir o teto de CPA hipotético por CPA, ROAS e CTR reais por praça, segmento e janela comemorativa, e testar se a leitura por canal proposta nas seções de análise se confirma na prática.
 * Testar formalmente, com A/B ou geoteste, as duas alavancas levantadas na análise que a mídia sozinha não resolve: frete grátis por região (P2 e P4) e antecipação de campanhas de descoberta no Pinterest antes das datas comemorativas (P1 e P3).
+
+---
+
+## Bônus: dashboard de mídia paga no Databricks
+
+Além dos gráficos do notebook 06, a Gold alimenta um **Databricks AI/BI Dashboard** com a mesma leitura, só que interativo e pensado para consumo de mídia: 4 painéis (Sazonalidade, Geografia, Segmentos e teto de CPA, Frete/Pagamento/Recompra), com contadores, gráficos de barra e tabelas — nada aqui recalcula os números das seções acima, é a mesma Gold, só apresentada como dashboard.
+
+* [`dashboard/dashboard_midia_paga.lvdash.json`](dashboard/dashboard_midia_paga.lvdash.json) — arquivo pronto para importar: no Databricks, **Workspace → Create → Dashboard**, menu "**...**" no canto superior → **Import dashboard from file**.
+* [`dashboard/consultas_dashboard_midia.sql`](dashboard/consultas_dashboard_midia.sql) — as mesmas 11 consultas, comentadas, como plano B: se a importação falhar (formatos de dashboard variam entre versões do Databricks), crie um dashboard vazio e cole cada consulta em "Add data → Create from SQL", na ordem do arquivo.
+* Se o catálogo do seu workspace caiu para `workspace` em vez de `mvp_moda` (ver `01_setup_catalogo_e_volume`), troque `mvp_moda` por `workspace` nos dois arquivos antes de importar/colar — é um find-and-replace de texto simples, o dashboard não depende do widget `catalogo` dos notebooks.
+* Todas as 11 consultas foram validadas em Spark local contra os dados reais do Olist antes de entrarem no arquivo, com os mesmos números das seções de análise acima (por exemplo, `ds_kpis_moda` devolve os mesmos 3.428 pedidos e R$ 340.870 de receita da abertura da seção de Análise de Dados).
+
+![Dashboard de mídia paga no Databricks (AI/BI Dashboard)](docs/images/23_dashboard_midia.png)
 
 ---
 
@@ -912,6 +927,9 @@ Passo a passo completo (inclusive a lista de screenshots): [`docs/GUIA_EXECUCAO.
 │   ├── 06_analise_perguntas.py        # respostas às perguntas
 │   ├── 07_catalogo_de_dados.py        # catálogo no Unity Catalog
 │   └── catalogo_metadados.py          # fonte única do catálogo
+├── dashboard/
+│   ├── dashboard_midia_paga.lvdash.json  # AI/BI Dashboard pronto para importar
+│   └── consultas_dashboard_midia.sql     # as mesmas consultas, para montar manualmente (plano B)
 ├── docs/
 │   ├── GUIA_EXECUCAO.md               # passo a passo e checklist de screenshots
 │   ├── CATALOGO_DE_DADOS.md           # catálogo completo (gerado)
