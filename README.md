@@ -948,3 +948,4 @@ Passo a passo completo (inclusive a lista de screenshots): [`docs/GUIA_EXECUCAO.
 * Databricks. *What is a data lakehouse?* e *What is the medallion lakehouse architecture?* https://www.databricks.com/blog/what-is-medallion-architecture
 * Databricks. *Unity Catalog* e *Delta Lake*. https://docs.databricks.com/aws/en/data-governance/unity-catalog/ e https://docs.databricks.com/aws/en/delta
 * Creative Commons. *CC BY-NC-SA 4.0*. https://creativecommons.org/licenses/by-nc-sa/4.0/
+X
