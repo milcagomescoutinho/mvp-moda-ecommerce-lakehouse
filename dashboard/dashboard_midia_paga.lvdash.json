@@ -1,0 +1,1144 @@
+{
+  "datasets": [
+    {
+      "name": "ds_kpis_moda",
+      "displayName": "KPIs de moda (contadores)",
+      "queryLines": [
+        "WITH item_moda AS (\n",
+        "  SELECT f.order_id, f.preco\n",
+        "  FROM mvp_moda.gold.fato_vendas_item f\n",
+        "  JOIN mvp_moda.gold.dim_produto p ON f.sk_produto = p.sk_produto\n",
+        "  WHERE f.conta_receita AND p.eh_moda\n",
+        "),\n",
+        "item_todos AS (\n",
+        "  SELECT f.order_id, f.preco\n",
+        "  FROM mvp_moda.gold.fato_vendas_item f\n",
+        "  WHERE f.conta_receita\n",
+        ")\n",
+        "SELECT\n",
+        "  (SELECT COUNT(DISTINCT order_id) FROM item_moda) AS pedidos_moda,\n",
+        "  (SELECT CAST(SUM(preco) AS DOUBLE) FROM item_moda) AS receita_moda,\n",
+        "  (SELECT CAST(SUM(preco) AS DOUBLE) FROM item_moda) / (SELECT COUNT(DISTINCT order_id) FROM item_moda) AS ticket_medio_moda,\n",
+        "  (SELECT CAST(SUM(preco) AS DOUBLE) FROM item_moda) / (SELECT CAST(SUM(preco) AS DOUBLE) FROM item_todos) AS pct_moda_marketplace\n"
+      ]
+    },
+    {
+      "name": "ds_receita_mensal",
+      "displayName": "Receita mensal de moda",
+      "queryLines": [
+        "SELECT d.ano_mes,\n",
+        "       COUNT(DISTINCT f.order_id) AS pedidos,\n",
+        "       CAST(SUM(f.preco) AS DOUBLE) AS receita\n",
+        "FROM mvp_moda.gold.fato_vendas_item f\n",
+        "JOIN mvp_moda.gold.dim_produto p ON f.sk_produto = p.sk_produto\n",
+        "JOIN mvp_moda.gold.dim_data d ON f.sk_data_compra = d.sk_data\n",
+        "WHERE f.conta_receita AND p.eh_moda\n",
+        "  AND d.data BETWEEN '2017-01-01' AND '2018-08-31'\n",
+        "GROUP BY d.ano_mes\n",
+        "ORDER BY d.ano_mes\n"
+      ]
+    },
+    {
+      "name": "ds_eventos",
+      "displayName": "Índice de receita diária por janela comemorativa",
+      "queryLines": [
+        "WITH rec AS (\n",
+        "  SELECT d.data, CAST(SUM(f.preco) AS DOUBLE) AS receita\n",
+        "  FROM mvp_moda.gold.fato_vendas_item f\n",
+        "  JOIN mvp_moda.gold.dim_produto p ON f.sk_produto = p.sk_produto\n",
+        "  JOIN mvp_moda.gold.dim_data d ON f.sk_data_compra = d.sk_data\n",
+        "  WHERE f.conta_receita AND p.eh_moda AND d.data BETWEEN '2017-01-01' AND '2018-08-31'\n",
+        "  GROUP BY d.data\n",
+        "),\n",
+        "dias AS (\n",
+        "  SELECT data, evento_comercial FROM mvp_moda.gold.dim_data WHERE data BETWEEN '2017-01-01' AND '2018-08-31'\n",
+        "),\n",
+        "eventos AS (\n",
+        "  SELECT d.evento_comercial,\n",
+        "         COUNT(*) AS dias,\n",
+        "         SUM(COALESCE(r.receita, 0)) AS receita,\n",
+        "         SUM(COALESCE(r.receita, 0)) / COUNT(*) AS receita_por_dia\n",
+        "  FROM dias d LEFT JOIN rec r ON d.data = r.data\n",
+        "  GROUP BY d.evento_comercial\n",
+        "),\n",
+        "base AS (\n",
+        "  SELECT receita_por_dia AS base_dia FROM eventos WHERE evento_comercial = 'Sem evento'\n",
+        ")\n",
+        "SELECT e.evento_comercial, e.dias, e.receita, e.receita_por_dia,\n",
+        "       e.receita_por_dia / b.base_dia * 100 AS indice_vs_dia_normal\n",
+        "FROM eventos e CROSS JOIN base b\n",
+        "ORDER BY indice_vs_dia_normal DESC\n"
+      ]
+    },
+    {
+      "name": "ds_uf",
+      "displayName": "Demanda de moda por UF",
+      "queryLines": [
+        "SELECT uf, regiao, pedidos, clientes_unicos,\n",
+        "       CAST(receita AS DOUBLE) AS receita,\n",
+        "       CAST(receita_por_pedido AS DOUBLE) AS receita_por_pedido,\n",
+        "       frete_pct_da_receita,\n",
+        "       CAST(receita AS DOUBLE) / SUM(CAST(receita AS DOUBLE)) OVER () AS pct_receita\n",
+        "FROM mvp_moda.gold.agg_uf_moda\n",
+        "ORDER BY receita DESC\n"
+      ]
+    },
+    {
+      "name": "ds_uf_top10",
+      "displayName": "Top 10 UFs por receita de moda",
+      "queryLines": [
+        "SELECT uf, CAST(receita AS DOUBLE) AS receita\n",
+        "FROM mvp_moda.gold.agg_uf_moda\n",
+        "ORDER BY receita DESC\n",
+        "LIMIT 10\n"
+      ]
+    },
+    {
+      "name": "ds_frete_regiao",
+      "displayName": "Frete mediano por região",
+      "queryLines": [
+        "SELECT c.regiao,\n",
+        "       COUNT(DISTINCT f.order_id) AS pedidos,\n",
+        "       CAST(percentile_approx(f.frete_pct_preco, 0.5) AS DOUBLE) AS frete_pct_mediano_item\n",
+        "FROM mvp_moda.gold.fato_vendas_item f\n",
+        "JOIN mvp_moda.gold.dim_produto p ON f.sk_produto = p.sk_produto\n",
+        "JOIN mvp_moda.gold.dim_cliente c ON f.sk_cliente = c.sk_cliente\n",
+        "WHERE f.conta_receita AND p.eh_moda\n",
+        "GROUP BY c.regiao\n",
+        "ORDER BY frete_pct_mediano_item DESC\n"
+      ]
+    },
+    {
+      "name": "ds_segmentos",
+      "displayName": "Receita e teto de CPA por segmento de moda",
+      "queryLines": [
+        "WITH seg AS (\n",
+        "  SELECT segmento, SUM(pedidos) AS pedidos, SUM(itens) AS itens,\n",
+        "         CAST(SUM(receita) AS DOUBLE) AS receita\n",
+        "  FROM mvp_moda.gold.agg_mensal_segmento\n",
+        "  WHERE ano_mes BETWEEN '2017-01' AND '2018-08' AND segmento <> 'Fora de moda'\n",
+        "  GROUP BY segmento\n",
+        ")\n",
+        "SELECT segmento, pedidos, itens, receita,\n",
+        "       receita / pedidos AS ticket_por_pedido,\n",
+        "       receita / SUM(receita) OVER () AS pct_receita_moda,\n",
+        "       (receita / pedidos) * 0.10 AS teto_cpa_10pct,\n",
+        "       (receita / pedidos) * 0.20 AS teto_cpa_20pct,\n",
+        "       (receita / pedidos) * 0.30 AS teto_cpa_30pct\n",
+        "FROM seg\n",
+        "ORDER BY receita DESC\n"
+      ]
+    },
+    {
+      "name": "ds_frete_faixas",
+      "displayName": "Frete sobre o valor dos itens: pedidos e nota",
+      "queryLines": [
+        "WITH p AS (\n",
+        "  SELECT fp.order_id, fp.nota_avaliacao, fp.entregue_no_prazo,\n",
+        "         CAST(fp.frete_total AS DOUBLE) / CAST(fp.receita_itens AS DOUBLE) AS frete_pct\n",
+        "  FROM mvp_moda.gold.fato_pedido fp\n",
+        "  WHERE fp.conta_receita AND fp.eh_pedido_moda AND fp.receita_itens > 0\n",
+        ")\n",
+        "SELECT CASE WHEN frete_pct < 0.10 THEN '1. até 10%'\n",
+        "            WHEN frete_pct < 0.25 THEN '2. de 10% a 25%'\n",
+        "            WHEN frete_pct < 0.50 THEN '3. de 25% a 50%'\n",
+        "            ELSE '4. acima de 50%' END AS faixa_frete_sobre_preco,\n",
+        "       COUNT(*) AS pedidos,\n",
+        "       AVG(nota_avaliacao) AS nota_media,\n",
+        "       AVG(CASE WHEN entregue_no_prazo THEN 1.0 WHEN entregue_no_prazo IS NOT NULL THEN 0.0 END) AS pct_no_prazo\n",
+        "FROM p GROUP BY 1 ORDER BY 1\n"
+      ]
+    },
+    {
+      "name": "ds_pagamento",
+      "displayName": "Meio de pagamento principal",
+      "queryLines": [
+        "SELECT COALESCE(tipo_pagamento_principal, 'sem pagamento registrado') AS meio_principal,\n",
+        "       COUNT(*) AS pedidos,\n",
+        "       CAST(SUM(valor_pago_total) AS DOUBLE) AS valor,\n",
+        "       COUNT(*) / SUM(COUNT(*)) OVER () AS pct_pedidos\n",
+        "FROM mvp_moda.gold.fato_pedido\n",
+        "WHERE conta_receita AND eh_pedido_moda\n",
+        "GROUP BY 1\n",
+        "ORDER BY pedidos DESC\n"
+      ]
+    },
+    {
+      "name": "ds_parcelas",
+      "displayName": "Ticket mediano por faixa de parcelas (cartão)",
+      "queryLines": [
+        "SELECT CONCAT(CAST(CASE WHEN parcelas_max = 1 THEN 1 WHEN parcelas_max <= 3 THEN 2 WHEN parcelas_max <= 6 THEN 3\n",
+        "            WHEN parcelas_max <= 10 THEN 4 ELSE 5 END AS STRING), '. ',\n",
+        "       CASE WHEN parcelas_max = 1 THEN '1x (à vista)'\n",
+        "            WHEN parcelas_max BETWEEN 2 AND 3 THEN '2 a 3x'\n",
+        "            WHEN parcelas_max BETWEEN 4 AND 6 THEN '4 a 6x'\n",
+        "            WHEN parcelas_max BETWEEN 7 AND 10 THEN '7 a 10x'\n",
+        "            ELSE '11x ou mais' END) AS faixa_parcelas,\n",
+        "       COUNT(*) AS pedidos,\n",
+        "       CAST(percentile_approx(CAST(valor_pago_total AS DOUBLE), 0.5) AS DOUBLE) AS ticket_mediano\n",
+        "FROM mvp_moda.gold.fato_pedido\n",
+        "WHERE conta_receita AND eh_pedido_moda AND tipo_pagamento_principal = 'credit_card' AND parcelas_max IS NOT NULL\n",
+        "GROUP BY 1\n",
+        "ORDER BY 1\n"
+      ]
+    },
+    {
+      "name": "ds_recompra",
+      "displayName": "Recompra: moda vs. marketplace inteiro",
+      "queryLines": [
+        "WITH cli_moda AS (\n",
+        "  SELECT c.cliente_unico_id, COUNT(DISTINCT f.order_id) AS n\n",
+        "  FROM mvp_moda.gold.fato_vendas_item f\n",
+        "  JOIN mvp_moda.gold.dim_produto p ON f.sk_produto = p.sk_produto\n",
+        "  JOIN mvp_moda.gold.dim_cliente c ON f.sk_cliente = c.sk_cliente\n",
+        "  WHERE f.conta_receita AND p.eh_moda\n",
+        "  GROUP BY c.cliente_unico_id\n",
+        "),\n",
+        "cli_todos AS (\n",
+        "  SELECT c.cliente_unico_id, COUNT(DISTINCT f.order_id) AS n\n",
+        "  FROM mvp_moda.gold.fato_vendas_item f\n",
+        "  JOIN mvp_moda.gold.dim_cliente c ON f.sk_cliente = c.sk_cliente\n",
+        "  WHERE f.conta_receita\n",
+        "  GROUP BY c.cliente_unico_id\n",
+        "),\n",
+        "uniao AS (\n",
+        "  SELECT 'Moda' AS universo,\n",
+        "         CASE WHEN n = 1 THEN '1 pedido' WHEN n = 2 THEN '2 pedidos' ELSE '3 ou mais' END AS faixa,\n",
+        "         COUNT(*) AS clientes\n",
+        "  FROM cli_moda GROUP BY 2\n",
+        "  UNION ALL\n",
+        "  SELECT 'Marketplace inteiro' AS universo,\n",
+        "         CASE WHEN n = 1 THEN '1 pedido' WHEN n = 2 THEN '2 pedidos' ELSE '3 ou mais' END AS faixa,\n",
+        "         COUNT(*) AS clientes\n",
+        "  FROM cli_todos GROUP BY 2\n",
+        ")\n",
+        "SELECT universo, faixa, clientes,\n",
+        "       clientes / SUM(clientes) OVER (PARTITION BY universo) AS pct_clientes\n",
+        "FROM uniao\n",
+        "ORDER BY universo, faixa\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "pagina_sazonalidade",
+      "displayName": "Visão geral e sazonalidade (P1)",
+      "layout": [
+        {
+          "widget": {
+            "name": "widget_1",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpis_moda",
+                  "fields": [
+                    {
+                      "name": "pedidos_moda",
+                      "expression": "`pedidos_moda`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "pedidos_moda",
+                  "displayName": "Pedidos com item de moda"
+                }
+              },
+              "frame": {
+                "title": "Pedidos com item de moda",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_2",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpis_moda",
+                  "fields": [
+                    {
+                      "name": "receita_moda",
+                      "expression": "`receita_moda`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "receita_moda",
+                  "displayName": "Receita de moda (R$, sem frete)"
+                }
+              },
+              "frame": {
+                "title": "Receita de moda (R$, sem frete)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_3",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpis_moda",
+                  "fields": [
+                    {
+                      "name": "ticket_medio_moda",
+                      "expression": "`ticket_medio_moda`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "ticket_medio_moda",
+                  "displayName": "Ticket médio de moda (R$)"
+                }
+              },
+              "frame": {
+                "title": "Ticket médio de moda (R$)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_4",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpis_moda",
+                  "fields": [
+                    {
+                      "name": "pct_moda_marketplace",
+                      "expression": "`pct_moda_marketplace`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "pct_moda_marketplace",
+                  "displayName": "% de moda no marketplace"
+                }
+              },
+              "frame": {
+                "title": "% de moda no marketplace",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_receita_mensal",
+                  "fields": [
+                    {
+                      "name": "ano_mes",
+                      "expression": "`ano_mes`"
+                    },
+                    {
+                      "name": "receita",
+                      "expression": "`receita`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "ano_mes",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Mês"
+                },
+                "y": {
+                  "fieldName": "receita",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Receita (R$)"
+                }
+              },
+              "frame": {
+                "title": "Receita de moda por mês",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 8,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_6",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_eventos",
+                  "fields": [
+                    {
+                      "name": "evento_comercial",
+                      "expression": "`evento_comercial`"
+                    },
+                    {
+                      "name": "dias",
+                      "expression": "`dias`"
+                    },
+                    {
+                      "name": "receita_por_dia",
+                      "expression": "`receita_por_dia`"
+                    },
+                    {
+                      "name": "indice_vs_dia_normal",
+                      "expression": "`indice_vs_dia_normal`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "evento_comercial",
+                    "displayName": "Janela"
+                  },
+                  {
+                    "fieldName": "dias",
+                    "displayName": "Dias"
+                  },
+                  {
+                    "fieldName": "receita_por_dia",
+                    "displayName": "Receita/dia (R$)"
+                  },
+                  {
+                    "fieldName": "indice_vs_dia_normal",
+                    "displayName": "Índice (dia normal=100)"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Índice de receita diária por janela comemorativa (dia normal = 100)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 8,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "pagina_geografia",
+      "displayName": "Geografia (P2)",
+      "layout": [
+        {
+          "widget": {
+            "name": "widget_7",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_uf_top10",
+                  "fields": [
+                    {
+                      "name": "uf",
+                      "expression": "`uf`"
+                    },
+                    {
+                      "name": "receita",
+                      "expression": "`receita`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "uf",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "UF"
+                },
+                "y": {
+                  "fieldName": "receita",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Receita (R$)"
+                }
+              },
+              "frame": {
+                "title": "Top 10 UFs por receita de moda",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_8",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_frete_regiao",
+                  "fields": [
+                    {
+                      "name": "regiao",
+                      "expression": "`regiao`"
+                    },
+                    {
+                      "name": "frete_pct_mediano_item",
+                      "expression": "`frete_pct_mediano_item`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "regiao",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Região"
+                },
+                "y": {
+                  "fieldName": "frete_pct_mediano_item",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Frete / preço do item (mediana)"
+                }
+              },
+              "frame": {
+                "title": "Frete mediano sobre o preço do item, por região",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_9",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_uf",
+                  "fields": [
+                    {
+                      "name": "uf",
+                      "expression": "`uf`"
+                    },
+                    {
+                      "name": "regiao",
+                      "expression": "`regiao`"
+                    },
+                    {
+                      "name": "pedidos",
+                      "expression": "`pedidos`"
+                    },
+                    {
+                      "name": "receita",
+                      "expression": "`receita`"
+                    },
+                    {
+                      "name": "receita_por_pedido",
+                      "expression": "`receita_por_pedido`"
+                    },
+                    {
+                      "name": "frete_pct_da_receita",
+                      "expression": "`frete_pct_da_receita`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "uf",
+                    "displayName": "UF"
+                  },
+                  {
+                    "fieldName": "regiao",
+                    "displayName": "Região"
+                  },
+                  {
+                    "fieldName": "pedidos",
+                    "displayName": "Pedidos"
+                  },
+                  {
+                    "fieldName": "receita",
+                    "displayName": "Receita (R$)"
+                  },
+                  {
+                    "fieldName": "receita_por_pedido",
+                    "displayName": "Ticket (R$)"
+                  },
+                  {
+                    "fieldName": "frete_pct_da_receita",
+                    "displayName": "Frete / receita"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Demanda de moda por UF (completa)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 8,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "pagina_segmentos",
+      "displayName": "Segmentos e teto de CPA (P3)",
+      "layout": [
+        {
+          "widget": {
+            "name": "widget_10",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_segmentos",
+                  "fields": [
+                    {
+                      "name": "segmento",
+                      "expression": "`segmento`"
+                    },
+                    {
+                      "name": "receita",
+                      "expression": "`receita`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "segmento",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Segmento"
+                },
+                "y": {
+                  "fieldName": "receita",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Receita (R$)"
+                }
+              },
+              "frame": {
+                "title": "Receita por segmento de moda",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 8,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_11",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_segmentos",
+                  "fields": [
+                    {
+                      "name": "segmento",
+                      "expression": "`segmento`"
+                    },
+                    {
+                      "name": "pedidos",
+                      "expression": "`pedidos`"
+                    },
+                    {
+                      "name": "receita",
+                      "expression": "`receita`"
+                    },
+                    {
+                      "name": "ticket_por_pedido",
+                      "expression": "`ticket_por_pedido`"
+                    },
+                    {
+                      "name": "teto_cpa_10pct",
+                      "expression": "`teto_cpa_10pct`"
+                    },
+                    {
+                      "name": "teto_cpa_20pct",
+                      "expression": "`teto_cpa_20pct`"
+                    },
+                    {
+                      "name": "teto_cpa_30pct",
+                      "expression": "`teto_cpa_30pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "segmento",
+                    "displayName": "Segmento"
+                  },
+                  {
+                    "fieldName": "pedidos",
+                    "displayName": "Pedidos"
+                  },
+                  {
+                    "fieldName": "receita",
+                    "displayName": "Receita (R$)"
+                  },
+                  {
+                    "fieldName": "ticket_por_pedido",
+                    "displayName": "Ticket/pedido (R$)"
+                  },
+                  {
+                    "fieldName": "teto_cpa_10pct",
+                    "displayName": "Teto CPA 10% (R$)"
+                  },
+                  {
+                    "fieldName": "teto_cpa_20pct",
+                    "displayName": "Teto CPA 20% (R$)"
+                  },
+                  {
+                    "fieldName": "teto_cpa_30pct",
+                    "displayName": "Teto CPA 30% (R$)"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Teto de CPA por segmento (margem hipotética de 10/20/30%)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 8,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "pagina_frete_pagamento_recompra",
+      "displayName": "Frete, pagamento e recompra (P4, P5, P6)",
+      "layout": [
+        {
+          "widget": {
+            "name": "widget_12",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_frete_faixas",
+                  "fields": [
+                    {
+                      "name": "faixa_frete_sobre_preco",
+                      "expression": "`faixa_frete_sobre_preco`"
+                    },
+                    {
+                      "name": "pedidos",
+                      "expression": "`pedidos`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "faixa_frete_sobre_preco",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Faixa de frete"
+                },
+                "y": {
+                  "fieldName": "pedidos",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Pedidos"
+                }
+              },
+              "frame": {
+                "title": "Pedidos por faixa de frete sobre o preço",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_13",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_frete_faixas",
+                  "fields": [
+                    {
+                      "name": "faixa_frete_sobre_preco",
+                      "expression": "`faixa_frete_sobre_preco`"
+                    },
+                    {
+                      "name": "nota_media",
+                      "expression": "`nota_media`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "faixa_frete_sobre_preco",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Faixa de frete"
+                },
+                "y": {
+                  "fieldName": "nota_media",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Nota média (1 a 5)"
+                }
+              },
+              "frame": {
+                "title": "Nota média por faixa de frete",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_14",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pagamento",
+                  "fields": [
+                    {
+                      "name": "meio_principal",
+                      "expression": "`meio_principal`"
+                    },
+                    {
+                      "name": "pedidos",
+                      "expression": "`pedidos`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "meio_principal",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Meio de pagamento"
+                },
+                "y": {
+                  "fieldName": "pedidos",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Pedidos"
+                }
+              },
+              "frame": {
+                "title": "Pedidos por meio de pagamento principal",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_15",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_parcelas",
+                  "fields": [
+                    {
+                      "name": "faixa_parcelas",
+                      "expression": "`faixa_parcelas`"
+                    },
+                    {
+                      "name": "ticket_mediano",
+                      "expression": "`ticket_mediano`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "faixa_parcelas",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Faixa de parcelas"
+                },
+                "y": {
+                  "fieldName": "ticket_mediano",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Ticket mediano (R$)"
+                }
+              },
+              "frame": {
+                "title": "Ticket mediano por faixa de parcelas (cartão)",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 6,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "widget_16",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_recompra",
+                  "fields": [
+                    {
+                      "name": "universo",
+                      "expression": "`universo`"
+                    },
+                    {
+                      "name": "faixa",
+                      "expression": "`faixa`"
+                    },
+                    {
+                      "name": "clientes",
+                      "expression": "`clientes`"
+                    },
+                    {
+                      "name": "pct_clientes",
+                      "expression": "`pct_clientes`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "universo",
+                    "displayName": "Universo"
+                  },
+                  {
+                    "fieldName": "faixa",
+                    "displayName": "Nº de pedidos"
+                  },
+                  {
+                    "fieldName": "clientes",
+                    "displayName": "Clientes"
+                  },
+                  {
+                    "fieldName": "pct_clientes",
+                    "displayName": "% dos clientes"
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Recompra: moda vs. marketplace inteiro",
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 8,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ]
+}
